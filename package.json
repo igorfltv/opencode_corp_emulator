@@ -1,0 +1,10 @@
+{
+  "name": "opencode-corp-emulator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run src/main.js",
+    "test": "bun test tests"
+  }
+}
