@@ -19,7 +19,7 @@ class HTTPError extends Error { constructor(status, message) { super(message); t
 const fail = (condition, message, status = 400) => { if (condition) throw new HTTPError(status, message); };
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: { "Cache-Control": "no-store", ...headers } });
 const html = (text, nonce = "", callbackOrigin = "") => new Response(text, { headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "Content-Security-Policy": `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; connect-src 'self'; form-action 'self' ${callbackOrigin}; frame-ancestors 'none'; base-uri 'none'` } });
-async function body(request) { fail(!request.headers.get("content-type")?.includes("application/json"), "Expected JSON"); const text = await request.text(); fail(text.length > 65536, "Body too large"); try { return JSON.parse(text); } catch { throw new HTTPError(400, "Invalid JSON"); } }
+async function body(request, limit = 65536) { fail(!request.headers.get("content-type")?.includes("application/json"), "Expected JSON"); const text = await request.text(); fail(text.length > limit, "Body too large"); try { return JSON.parse(text); } catch { throw new HTTPError(400, "Invalid JSON"); } }
 
 export function createEmulator({ port = 4310 } = {}) {
   const requests = new Map(), codes = new Map(), tokens = new Map();
@@ -35,7 +35,7 @@ export function createEmulator({ port = 4310 } = {}) {
     fail(!credential || credential.expiresAt <= Date.now(), "Unauthorized", 401);
     return { ...credential, hash: digest(raw) };
   };
-  const server = Bun.serve({ hostname: "127.0.0.1", port, maxRequestBodySize: 1048576,
+  const server = Bun.serve({ hostname: "127.0.0.1", port, maxRequestBodySize: 16777216,
     async fetch(request) {
       try {
         const url = new URL(request.url);
@@ -128,7 +128,7 @@ export function createEmulator({ port = 4310 } = {}) {
           }
           if (path === "/v1/models" && request.method === "GET") return json({ object: "list", data: [{ id: "demo-code", object: "model", owned_by: "company-demo" }] });
           if (path === "/v1/chat/completions" && request.method === "POST") {
-            const input = await body(request);
+            const input = await body(request, 16777216);
             const content = "Это локальный эмулятор, а не настоящая модель. Используйте /login, /refresh_config, /skills_load и /corp_status для проверки корпоративного плагина.";
             const id = `chatcmpl-${random()}`;
             const common = { id, created: Math.floor(Date.now() / 1000), model: "demo-code" };

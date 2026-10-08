@@ -69,6 +69,10 @@ test("account-specific skills, load signal and fixed inference response", async 
   expect((await (await request(emulator.baseURL, "/api/load", { token: accessToken })).json()).level).toBe("red");
   const completion = await (await request(emulator.baseURL, "/v1/chat/completions", { token: accessToken, method: "POST", body: { model: "demo-code", messages: [{ role: "user", content: "hello" }] } })).json();
   expect(completion.choices[0].message.content).toContain("локальный эмулятор");
+  const largeCompletion = await request(emulator.baseURL, "/v1/chat/completions", { token: accessToken, method: "POST", body: { model: "demo-code", messages: [{ role: "user", content: "x".repeat(1200000) }] } });
+  expect(largeCompletion.status).toBe(200);
+  const oversizedControl = await request(emulator.baseURL, "/admin/state", { method: "POST", body: { note: "x".repeat(70000) }, headers: { "x-demo-admin": emulator.adminToken } });
+  expect(oversizedControl.status).toBe(400);
 });
 
 test("role-scoped MCP catalog and demo personal-token connection", async () => {
