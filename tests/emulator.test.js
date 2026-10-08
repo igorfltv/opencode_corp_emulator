@@ -71,6 +71,18 @@ test("account-specific skills, load signal and fixed inference response", async 
   expect(completion.choices[0].message.content).toContain("локальный эмулятор");
 });
 
+test("role-scoped MCP catalog and demo personal-token connection", async () => {
+  const emulator = start();
+  const analyst = await login(emulator, "analyst");
+  const catalog = await (await request(emulator.baseURL, "/api/mcps", { token: analyst.accessToken })).json();
+  expect(catalog.servers.map(({ id }) => id)).toEqual(["confluence"]);
+  expect(catalog.servers[0].url).toBe(`${emulator.baseURL}/mcp/confluence`);
+  expect((await request(emulator.baseURL, "/mcp/confluence", { method: "POST", body: { jsonrpc: "2.0", id: 1, method: "tools/list" } })).status).toBe(401);
+  const connected = await request(emulator.baseURL, "/mcp/confluence", { token: "demo-confluence-token", method: "POST", body: { jsonrpc: "2.0", id: 1, method: "tools/list" } });
+  expect(connected.status).toBe(200);
+  expect((await connected.json()).result.tools[0].name).toBe("find_pages");
+});
+
 test("loopback and admin protection, outage, expiration and revocation", async () => {
   const emulator = start();
   expect((await request(emulator.baseURL, "/admin/state")).status).toBe(403);

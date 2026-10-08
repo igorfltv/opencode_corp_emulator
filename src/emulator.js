@@ -11,6 +11,10 @@ const skills = [
   { id: "corp-incident-triage", name: "Incident triage", description: "Сбор фактов при инциденте без опасных команд.", roles: ["engineering"], content: "Сначала уточни симптомы, временной интервал и затронутые системы. Собери доступные read-only метрики и логи. Отдели факты от гипотез. Не перезапускай сервисы без явного запроса." },
   { id: "corp-data-quality", name: "Data quality", description: "Проверка схемы, пропусков, дублей и качества данных.", roles: ["engineering", "analytics"], content: "Проверь схему, долю пропусков, дубликаты и ограничения данных. Не изменяй исходные данные. Приведи воспроизводимые проверки и явно укажи ограничения выборки." },
 ].map((skill) => { const content = `---\nname: ${skill.id}\ndescription: ${skill.description}\n---\n\n${skill.content}\n`; return { ...skill, content, version: "1.0.0", sha256: digest(content) }; });
+const mcps = [
+  { id: "jira", name: "Jira · демо", description: "Тестовые задачи. Введите только demo-jira-token; реальный PAT не нужен.", roles: ["engineering"], demoToken: "demo-jira-token", tool: "find_issues" },
+  { id: "confluence", name: "Confluence · демо", description: "Тестовые страницы. Введите только demo-confluence-token; реальный PAT не нужен.", roles: ["engineering", "analytics"], demoToken: "demo-confluence-token", tool: "find_pages" },
+];
 class HTTPError extends Error { constructor(status, message) { super(message); this.status = status; } }
 const fail = (condition, message, status = 400) => { if (condition) throw new HTTPError(status, message); };
 const json = (data, status = 200, headers = {}) => Response.json(data, { status, headers: { "Cache-Control": "no-store", ...headers } });
@@ -93,6 +97,21 @@ export function createEmulator({ port = 4310 } = {}) {
           return json({ accessToken, expiresAt, user: entry.user, configuration: configuration() });
         }
         if (path === "/oauth/revoke" && request.method === "POST") { const identity = authorize(request); tokens.delete(identity.hash); audit("logout", identity.user.id); return json({ revoked: true }); }
+        if (path.startsWith("/mcp/")) {
+          const service = mcps.find((item) => path === `/mcp/${item.id}`);
+          fail(!service, "MCP not found", 404);
+          fail(request.headers.get("authorization") !== `Bearer ${service.demoToken}`, "MCP personal token required", 401);
+          fail(request.method !== "POST", "Method not allowed", 405);
+          const call = await body(request);
+          if (call.method === "notifications/initialized") return new Response(null, { status: 202, headers: { "Cache-Control": "no-store" } });
+          const response = { jsonrpc: "2.0", id: call.id };
+          if (call.method === "initialize") response.result = { protocolVersion: "2025-03-26", capabilities: { tools: {} }, serverInfo: { name: `company-demo-${service.id}`, version: "0.1.0" } };
+          else if (call.method === "tools/list") response.result = { tools: [{ name: service.tool, description: `Поиск в демо-${service.name}`, inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] } }] };
+          else if (call.method === "tools/call" && call.params?.name === service.tool) response.result = { content: [{ type: "text", text: `${service.name}: пример результата для ${String(call.params.arguments?.query ?? "").slice(0, 100)}` }] };
+          else response.error = { code: -32601, message: "Method not found" };
+          audit("mcp.call", `${service.id}:${call.method}`);
+          return json(response);
+        }
         if (path.startsWith("/api/") || path.startsWith("/v1/")) {
           const identity = authorize(request); fail(state.offline, "Simulated API outage", 503);
           if (path === "/api/config" && request.method === "GET") {
@@ -102,6 +121,7 @@ export function createEmulator({ port = 4310 } = {}) {
           }
           if (path === "/api/load" && request.method === "GET") return json({ level: state.level, queue: { green: 2, yellow: 24, red: 130 }[state.level], observedAt: Date.now(), message: { green: "Нормальная нагрузка", yellow: "Высокая нагрузка; ответы могут идти медленнее", red: "Инференс перегружен; по возможности отложите тяжёлые задачи" }[state.level] });
           if (path === "/api/skills" && request.method === "GET") return json({ skills: skills.filter((skill) => skill.roles.includes(identity.user.role)).map(({ roles, content, ...skill }) => skill) });
+          if (path === "/api/mcps" && request.method === "GET") return json({ servers: mcps.filter((item) => item.roles.includes(identity.user.role)).map(({ roles, demoToken, tool, ...item }) => ({ ...item, url: `${baseURL}/mcp/${item.id}`, auth: "personal_token" })) });
           if (path.startsWith("/api/skills/") && request.method === "GET") {
             const skill = skills.find((skill) => skill.id === decodeURIComponent(path.slice("/api/skills/".length)));
             fail(!skill || !skill.roles.includes(identity.user.role), "Skill not available", 403); audit("skill.download", skill.id); return json({ content: skill.content });
